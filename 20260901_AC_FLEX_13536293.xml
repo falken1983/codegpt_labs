@@ -1,0 +1,3 @@
+﻿<Deals AnalyticsVersion="213.200.11321.0" Reference="New Portfolio 2:" Tag_Titles="DIVEMU">
+  <Deal>Object=FxLeveragedAccumulator,Reference=13536293,MtM=&lt;undefined&gt;,Tags=&lt;NONE&gt;,Buy_Sell=Sell,Domestic_Currency=USD,Foreign_Currency=EUR,Settlement_Date=04Jan2027,First_Observation_Date=07Jan2026,Last_Observation_Date=30Dec2026,Observation_Frequency=1w,Expiry_Date=30Dec2026,Strike=1.095,Lower_Barrier=1.03,Higher_Barrier=1.15,Principal=2600000,Leveraged_Principal=5200000,Is_Fade_In=Yes,Observation_Type=Above,Known_FX_Rates=07Jan2026=1.1687\,Accumulation_Currency=USD,Observation_Schedule_Adjustment_Method=Following,Calendars=TGT</Deal>  
+</Deals>
