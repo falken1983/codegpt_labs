@@ -1,0 +1,129 @@
+---
+title: "Calibración de Superficies de Volatilidad FX"
+subtitle: "SVI Libre de Arbitraje: Ajuste Cónico y Corrección Asintótica"
+author: "Quants TVR"
+# date: last-modified
+lang: es
+format:
+  typst:
+    toc: false
+    number-sections: true
+    margin:
+      x: 2cm
+      y: 2.5cm
+---
+
+# Introducción
+
+La construcción de una superficie de volatilidad robusta en el mercado de divisas (FX) enfrenta dos retos principales: la eficiencia computacional en el ajuste de los smiles y la garantía de ausencia de arbitraje estático (calendario y mariposa). 
+
+Este informe resume la metodología implementada basada en la parametrización **Raw SVI de Gatheral**, utilizando la técnica de ajuste directo de **Schadner** y un algoritmo de corrección asintótica compensada.
+
+# Calibración Directa: El Enfoque de Schadner
+
+El modelo Raw SVI define la varianza total acumulada $w(k)$ para un log-moneyness $k$ como:
+
+$$
+w(k) = a + b [ \rho(k - m) + \sqrt{(k - m)^2 + \sigma^2} ]
+$$
+
+La innovación de **Wolfgang Schadner (2023)** consiste en observar que la geometría de esta función es una hipérbola. Elevando al cuadrado el término de la raíz y reordenando, obtenemos la forma general de una cónica:
+
+$$
+A k^2 + B k w + C w^2 + D k + E w + F = 0
+$$
+
+Al normalizar $C = 1$, el problema de encontrar los parámetros óptimos se transforma en un sistema de **Mínimos Cuadrados Ordinarios (OLS)** lineal, eliminando la necesidad de solvers no lineales y garantizando la convergencia global instantánea.
+
+# SVI Libres de Arbitraje de Calendario
+
+## Comportamiento Asintótico
+
+Para evitar el arbitraje de calendario, la varianza total de un plazo largo ($T_2$) debe ser estrictamente mayor que la de un plazo corto ($T_1$). Geométricamente, esto requiere que las asíntotas de $T_2$ sean más "abiertas" o empinadas que las de $T_1$.
+
+Las pendientes asintóticas se definen como:
+
+* **Ala Derecha ($k \to \infty$):** $$S_R = b(1 + \rho)$$
+* **Ala Izquierda ($k \to -\infty$):** $$S_L = b(1 - \rho)$$
+
+### Formulación de la Corrección
+
+Si para un par de plazos consecutivos se detecta que $S_{T_2} < S_{T_1}$, se definen nuevas pendientes $\tilde{S}$ tales que $\tilde{S}_{T_2} = S_{T_1} + \epsilon$. Los nuevos parámetros de forma se derivan analíticamente:
+
+$$\tilde{b} = \frac{\tilde{S}_R + \tilde{S}_L}{2}$$
+
+$$\tilde{\rho} = \frac{\tilde{S}_R - \tilde{S}_L}{\tilde{S}_R + \tilde{S}_L}$$
+
+Tras ajustar la forma, se realiza un desplazamiento vertical del parámetro $a$ si es necesario asegurar que $w(k, T_2) \geq w(k, T_1)$ en toda la zona central del smile.
+
+## Estrategia de Corrección Bidireccional Compensada
+
+No siempre el error de arbitraje proviene de una mala calibración del plazo largo; a veces es el plazo corto el que presenta una curvatura excesiva. Para minimizar el impacto en las cotizaciones de mercado, se aplican dos estrategias en paralelo:
+
+1.  **Trayectoria Ascendente (Forward):** Se fija el primer vencimiento y se corrigen los sucesivos hacia el futuro.
+2.  **Trayectoria Descendente (Backward):** Se toma el último vencimiento (frecuentemente más estable en las alas) y se corrigen los anteriores hacia el presente.
+
+**Criterio de Selección:**
+El algoritmo selecciona la superficie final basándose en el siguiente orden de prioridad:
+
+* **Robustez:** Se elige la trayectoria que requiera corregir el menor número de *slices*.
+
+* **Fidelidad:** En caso de empate, se elige la que minimice el "bump" acumulado de volatilidad (RMSD) respecto a los datos originales de mercado.
+
+# Salto Sticky Strike e Interpolación en Deltas
+
+Una vez obtenida la superficie SVI corregida, el reto es devolver los puntos a etiquetas de mercado (10D, 25D, ATM). Dado que el mercado FX opera bajo la convención de **Sticky Delta**, cualquier cambio en la volatilidad desplaza el strike correspondiente a una delta dada.
+
+## Estrategia de Punto Fijo
+
+Para garantizar que los datos exportados sean consistentes con la nueva SVI y que el sistema receptor no reintroduzca arbitrajes, se sigue este flujo:
+
+1.  **Sticky Strike Evaluation:** Se evalúa la SVI corregida en los strikes originales del mercado ($K_{old}$).
+2.  **Delta Drift Calculation:** Para cada par $(K_{old}, \sigma_{new})$, se calcula la Delta exacta ($\Delta_{new}$) utilizando la convención del activo (*Premium Included/Excluded*). Esto genera nodos $(\Delta_{new}, \sigma_{new})$.
+3.  **Monotone Resampling:** Se construye un interpolador **PCHIP** sobre el eje de Deltas. 
+4.  **Market Quote Recovery:** Se evalúa el interpolador en los targets nominales (0.10, 0.25, 0.50).
+
+Este proceso asegura que la volatilidad exportada sea la exacta para que, cuando el sistema destino calcule el strike según su convención de Delta, el punto caiga **exactamente** sobre la superficie SVI libre de arbitraje.
+
+<!-- # Visualización Conceptual (Lógica de Asíntotas)
+
+```{=typst}
+#import "@preview/cetz:0.1.2": canvas, draw
+
+#figure(
+  caption: [Representación del principio de apertura asintótica. La curva superior ($T_2$) debe poseer pendientes asintóticas iguales o mayores a la curva inferior ($T_1$) para garantizar la ausencia de cruces.],
+  canvas(length: 1cm, {
+    draw.set-style(stroke: (thickness: 1pt))
+    
+    // Ejes
+    draw.line((-3, 0), (3, 0), mark: (end: ">"), name: "x")
+    draw.line((0, 0), (0, 4), mark: (end: ">"), name: "y")
+    draw.content("x.end", anchor: "north", padding: .2)[$k$]
+    draw.content("y.end", anchor: "east", padding: .2)[$w(k)$]
+
+    // Función auxiliar para evaluar SVI
+    let t1(x) = { 0.6 + 0.3 * ( -0.1*x + calc.sqrt(calc.pow(x, 2) + 0.2) ) }
+    let t2(x) = { 1.3 + 0.6 * ( -0.1*x + calc.sqrt(calc.pow(x, 2) + 0.3) ) }
+    
+    // Generar puntos para T1 (Naranja)
+    let points1 = ()
+    for i in range(0, 50) {
+      let x = -2.5 + i * 5.0 / 49
+      points1.push((x, t1(x)))
+    }
+    draw.line(..points1, stroke: orange)
+    
+    // Generar puntos para T2 (Azul)
+    let points2 = ()
+    for i in range(0, 50) {
+      let x = -2.5 + i * 5.0 / 49
+      points2.push((x, t2(x)))
+    }
+    draw.line(..points2, stroke: blue)
+    
+    // Líneas de tendencia (Asíntotas)
+    draw.line((-2.5, 2.2), (0, 1.3), (2.5, 2.0), stroke: (paint: blue, dash: "dashed", thickness: 0.5pt))
+    draw.line((-2.5, 1.2), (0, 0.6), (2.5, 1.0), stroke: (paint: orange, dash: "dashed", thickness: 0.5pt))
+  })
+)
+``` -->
