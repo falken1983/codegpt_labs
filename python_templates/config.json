@@ -1,0 +1,17 @@
+{
+    "criptomonedas": [
+        "BTC-EUR",
+        "ETH-EUR",
+        "XRP-EUR",
+        "LTC-EUR",
+        "ADA-EUR",
+        "DOT-EUR",
+        "LINK-EUR",
+        "XLM-EUR",
+        "DOGE-EUR",
+        "UNI-EUR"
+    ],
+    "periodo_años": 5,
+    "directorio_salida": "./datos_cripto",
+    "guardar_csv": true
+}
