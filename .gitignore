@@ -1,6 +1,12 @@
+__pycache__
 .vscode
 datos_cripto
 python_templates
 TeX
+documentation
+data
 *.json
 *.yaml
+*.log
+*.ipynb
+.DS_Store
