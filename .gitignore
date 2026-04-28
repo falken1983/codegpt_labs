@@ -1,7 +1,7 @@
 __pycache__
+.DS_Store
 .vscode
 datos_cripto
-python_templates
 TeX
 documentation
 data
@@ -9,4 +9,3 @@ data
 *.yaml
 *.log
 *.ipynb
-.DS_Store
