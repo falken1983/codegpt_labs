@@ -16,7 +16,7 @@ def is_prime(n: int) -> bool:
 
 def print_primes_up_to(limit: int) -> None:
     """Prints all prime numbers up to a given limit."""
-    primes: list[int] = []
+    primes = []
     for num in range(2, limit + 1):
         if is_prime(num):
             primes.append(num)

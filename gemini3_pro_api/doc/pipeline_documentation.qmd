@@ -1,0 +1,83 @@
+---
+title: "Documentación del Pipeline de Calibración de Inflación (ORE-Python)"
+format:
+  docx:
+    toc: true
+    number-sections: false
+  typst:
+    toc: true
+    number-sections: false
+---
+
+Este documento describe la arquitectura y el flujo de trabajo del pipeline de integración desarrollado para la calibración de modelos de inflación estocásticos (Jarrow-Yildirim y Dodgson-Kainth) utilizando la librería Open Source Risk Engine (ORE) en Python.
+
+## Objetivo de la Arquitectura
+
+El propósito principal de este sistema de interfaces es abstraer la complejidad intrínseca de los archivos de configuración nativos de ORE (XML y TXT estandarizados) y permitir la ingestión directa de datos de mercado estructurados en formatos planos convencionales (CSV).
+
+Esto permite a los ingenieros y cuants generar los datos en sus propios entornos (bases de datos, Excel, Pandas) y enviarlos al módulo de interfaces para que genere automáticamente todo el entorno de calibración y simulación que exige ORE.
+
+## Estructura del Módulo de Interfaces
+
+El pipeline está encapsulado en el paquete de Python `interfaces`, compuesto por tres scripts fundamentales:
+
+### 1. `market_data_converter.py`
+Esta clase actúa como el motor de traducción de datos.
+- **Función:** Convierte los CSVs genéricos en los archivos maestros de mercado de ORE.
+- **Salidas generadas:**
+  - `market.txt`: Archivo estructurado con tickers nativos de ORE que representa el mercado spot/forward actual (Tipos, Inflación y Volatilidad).
+  - `fixings.txt`: Histórico de los índices IPC, fundamental para establecer la base (Observation Lag) de los instrumentos de inflación.
+  - `curveconfig.xml`: Configura la topología de las curvas para las economías soportadas (EUR, GBP, USD), indicando a ORE cómo ensamblar los nodos de descuento y de inflación (Zero Coupon).
+  - `todaysmarket.xml`: Enlaza los identificadores del `curveconfig.xml` con los contextos de calibración.
+
+### 2. `simulation_builder.py`
+Esta clase es la responsable de definir los modelos matemáticos y la mecánica algorítmica de la calibración.
+- **Función:** Dinámicamente inyecta y formatea los esquemas de calibración y modelos de Pricing.
+- **Salidas generadas:** Archivos `simulation_*.xml`.
+- **Lógica implementada:**
+  - **Jarrow-Yildirim (JY):** Genera la estructura para calibrar la volatilidad del Índice IPC y la volatilidad/reversión de las Tasas Reales usando Baskets de CPI Floors y YoY Swaps proxy. Permite alternar entre calibración "libre" (`BestFit`) y "fija" para el parámetro de reversión a la media.
+  - **Dodgson-Kainth (DK):** Genera la topología equivalente (mapeada como un modelo LGM de inflación en ORE), configurando calibraciones basadas puramente en superficies de Cap/Floors con especificación de volatilidad Hagan.
+
+### 3. `main_controller.py`
+Es el orquestador principal del pipeline.
+- **Función:** Define el flujo de ejecución secuencial.
+- **Flujo:**
+  1. Recibe las rutas de los 4 archivos CSV externos.
+  2. Invoca al conversor de mercado (`MarketDataConverter`).
+  3. Invoca al constructor de simulaciones (`SimulationBuilder`) generando 4 perfiles: JY Libre, JY Fijo, DK Libre, DK Fijo.
+  4. Genera los archivos maestros `ore_{modelo}_{tipo}.xml` que centralizan todos los paths y actúan como punto de entrada (Setup) para la aplicación C++/Python nativa `OREApp`.
+
+---
+
+## Especificaciones de Ingestión de Datos (CSV)
+
+El pipeline requiere que el usuario proporcione los datos segregados en cuatro archivos CSV. Todos los archivos deben incluir cabeceras (la lógica interna ignora la cabecera si detecta la palabra "Fecha" o "#").
+
+### 1. `yield_csv` (Curvas de Descuento OIS)
+Contiene las tasas cero cupón de interés nominal para el descuento.
+
+- **Formato:** `Fecha, Divisa, Tenor, Tasa`
+- **Ejemplo de fila:** `2020-11-02, EUR, 1Y, 0.015`
+- *Mapeo Interno:* `ZERO/YIELD/{Divisa}/OIS/{Tenor}`
+
+### 2. `inf_swaps_csv` (Estructura Temporal de Inflación)
+Contiene las tasas par (Zero Coupon) del mercado de swaps de inflación.
+
+- **Formato:** `Fecha, Indice, Tenor, Tasa`
+- **Índices soportados:** `EUHICPXT`, `UKRPI`, `USCPI`.
+- **Ejemplo de fila:** `2020-11-02, EUHICPXT, 5Y, 0.021`
+- *Mapeo Interno:* `ZERO/INFLATION/{Indice}/{Tenor}`
+
+### 3. `caps_csv` (Superficie de Volatilidad de Inflación)
+Contiene las volatilidades implícitas para la calibración estocástica.
+
+- **Formato:** `Fecha, Indice, Tenor, Strike, Volatilidad`
+- **Ejemplo de fila:** `2020-11-02, EUHICPXT, 10Y, 0.02, 0.008`
+- *Mapeo Interno:* `INF_CAPFLOOR/VOL/{Indice}/{Tenor}/{Strike}`
+
+### 4. `fixings_csv` (Histórico de Fixings IPC)
+Es absolutamente crítico para la calibración debido al lag de observación. Contiene el valor histórico indexado del IPC.
+
+- **Formato:** `Fecha, Indice, Valor`
+- **Ejemplo de fila:** `2020-08-01, EUHICPXT, 105.32`
+- *Mapeo Interno:* Directamente asignado al Ticker del Índice.

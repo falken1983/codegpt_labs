@@ -3,6 +3,9 @@ __pycache__
 .vscode
 datos_cripto
 TeX
+Engine
+venv
+Output
 documentation
 data
 *.json
